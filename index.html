@@ -128,6 +128,17 @@
         let state = 'TREE'; 
         let selectedIndex = 0;
         let handX = 0.5;
+        
+        // NEW: Hand tracking sensitivity configuration
+        const HAND_CONFIG = {
+            // Center the active area to make first/last images easier to reach
+            activeCenterX: 0.5,  // Center of the active area
+            activeWidth: 0.5,    // Only use half of the camera width for 5 images
+            minX: 0.25,          // Minimum X boundary (center - width/2)
+            maxX: 0.75,          // Maximum X boundary (center + width/2)
+            // Smoothing factor for hand movement
+            smoothing: 0.2
+        };
 
         function init3D() {
             const container = document.getElementById('canvas-container');
@@ -208,7 +219,7 @@
             else baseColor.setHex(0xFFFFFF);
 
             for(let i=0; i<count; i++) {
-                colors[i*3] = baseColor.r;
+                colors[i*3]   = baseColor.r;
                 colors[i*3+1] = baseColor.g;
                 colors[i*3+2] = baseColor.b;
             }
@@ -288,7 +299,7 @@
             lCtx.font = 'bold 120px "Segoe UI", sans-serif';
             lCtx.fillStyle = '#FF69B4'; lCtx.textAlign = 'center';
             lCtx.shadowColor = "#FF1493"; lCtx.shadowBlur = 40; 
-            lCtx.fillText("I LOVE YOU ❤️", 512, 130);
+            lCtx.fillText("Hoang Quan & Khanh Lam", 512, 130);
             const loveTex = new THREE.CanvasTexture(loveCanvas);
             const loveMat = new THREE.MeshBasicMaterial({ map: loveTex, transparent: true, blending: THREE.AdditiveBlending });
             loveMesh = new THREE.Mesh(new THREE.PlaneGeometry(70, 18), loveMat);
@@ -348,7 +359,10 @@
 
             } else {
                 group.scale.set(1,1,1);
-                group.rotation.y += (handRotY - group.rotation.y) * 0.1;
+                
+                // NEW: Calculate hand rotation based on mapped hand position
+                const mappedHandRotation = (handX - 0.5) * 2.0; // Scale to [-1, 1]
+                group.rotation.y += (mappedHandRotation * 2.0 - group.rotation.y) * 0.1;
 
                 for(let i=0; i<count; i++) {
                     sizes[i] = baseSize;
@@ -365,11 +379,27 @@
             }
         }
 
+        // NEW: Map hand position from camera coordinates to a normalized range
+        function mapHandPosition(rawX) {
+            // Clamp and map the hand X position to the active area
+            let mappedX = (rawX - HAND_CONFIG.minX) / (HAND_CONFIG.maxX - HAND_CONFIG.minX);
+            
+            // Clamp to [0, 1] range
+            mappedX = Math.max(0, Math.min(1, mappedX));
+            
+            // Apply smoothing
+            handX = handX * (1 - HAND_CONFIG.smoothing) + mappedX * HAND_CONFIG.smoothing;
+            
+            return handX;
+        }
+
         function animate() {
             requestAnimationFrame(animate);
             const time = Date.now() * 0.001;
             const speed = 0.08;
-            const handRotY = (handX - 0.5) * 4.0;
+            
+            // NEW: Use mapped hand position for rotation
+            const handRotY = (handX - 0.5) * 2.0;
 
             updateParticleGroup(groupGold, 'gold', state, speed, handRotY, time);
             updateParticleGroup(groupRed, 'red', state, speed, handRotY, time);
@@ -396,9 +426,14 @@
 
             } else if (state === 'EXPLODE') {
                 titleMesh.visible = false; starMesh.visible = false; loveMesh.visible = false;
+                
+                // NEW: Map hand position to image selection (0 to 4)
+                const imageIndex = Math.floor(handX * 5);
+                selectedIndex = Math.min(4, Math.max(0, imageIndex));
+                
                 const baseAngle = groupGold.rotation.y; 
                 const angleStep = (Math.PI * 2) / 5;
-                let bestIdx = 0; let maxZ = -999;
+                
                 photoMeshes.forEach((mesh, i) => {
                     mesh.visible = true;
                     const angle = baseAngle + i * angleStep;
@@ -407,15 +442,19 @@
                     const y = Math.sin(time + i) * 3; 
                     mesh.position.lerp(new THREE.Vector3(x, y, z), 0.1);
                     mesh.lookAt(camera.position);
-                    if (z > maxZ) { maxZ = z; bestIdx = i; }
-                    if (z > 5) { 
-                        const ds = 1.0 + (z/CONFIG.photoOrbitRadius)*0.8; 
+                    
+                    // Highlight the selected image
+                    if (i === selectedIndex) {
+                        // Make selected image larger and more prominent
+                        const ds = 1.0 + (Math.abs(Math.sin(time * 2)) * 0.3);
                         mesh.scale.lerp(new THREE.Vector3(ds, ds, ds), 0.1);
+                        // Add a subtle pulsing effect
+                        mesh.material.opacity = 0.9 + 0.1 * Math.sin(time * 3);
                     } else {
                         mesh.scale.lerp(new THREE.Vector3(0.6, 0.6, 0.6), 0.1);
+                        mesh.material.opacity = 0.6;
                     }
                 });
-                selectedIndex = bestIdx;
 
             } else if (state === 'PHOTO') {
                 loveMesh.visible = false;
@@ -424,6 +463,8 @@
                         mesh.position.lerp(new THREE.Vector3(0, 0, 60), 0.1);
                         mesh.scale.lerp(new THREE.Vector3(5, 5, 5), 0.1);
                         mesh.lookAt(camera.position); mesh.rotation.z = 0;
+                        // Add a subtle rotation for visual interest
+                        mesh.rotation.y = Math.sin(time * 0.5) * 0.1;
                     } else {
                         mesh.scale.lerp(new THREE.Vector3(0,0,0), 0.1);
                     }
@@ -459,7 +500,11 @@
 
                 if(results.multiHandLandmarks.length > 0) {
                     const lm = results.multiHandLandmarks[0];
-                    handX = Math.max(0.1, Math.min(0.9, lm[9].x));
+                    
+                    // NEW: Use mapped hand position instead of raw position
+                    const rawHandX = lm[9].x;
+                    mapHandPosition(rawHandX);
+                    
                     const tips = [8,12,16,20]; const wrist = lm[0];
                     let openDist = 0; tips.forEach(i => openDist += Math.hypot(lm[i].x-wrist.x, lm[i].y-wrist.y));
                     const avgDist = openDist / 4;
@@ -481,6 +526,42 @@
                 onFrame: async () => { await hands.send({image: video}); }, width: 640, height: 480
             });
             cameraUtils.start();
+            
+            // NEW: Add visual indicator for hand tracking area
+            const indicatorCanvas = document.createElement('canvas');
+            indicatorCanvas.width = 160;
+            indicatorCanvas.height = 120;
+            indicatorCanvas.style.position = 'absolute';
+            indicatorCanvas.style.top = '15px';
+            indicatorCanvas.style.right = '15px';
+            indicatorCanvas.style.pointerEvents = 'none';
+            indicatorCanvas.style.opacity = '0.5';
+            document.body.appendChild(indicatorCanvas);
+            
+            const indicatorCtx = indicatorCanvas.getContext('2d');
+            function drawTrackingIndicator() {
+                indicatorCtx.clearRect(0, 0, indicatorCanvas.width, indicatorCanvas.height);
+                
+                // Draw the active tracking area (half of the camera width)
+                const activeLeft = HAND_CONFIG.minX * indicatorCanvas.width;
+                const activeWidth = (HAND_CONFIG.maxX - HAND_CONFIG.minX) * indicatorCanvas.width;
+                
+                indicatorCtx.strokeStyle = '#00FF00';
+                indicatorCtx.lineWidth = 2;
+                indicatorCtx.strokeRect(activeLeft, 0, activeWidth, indicatorCanvas.height);
+                
+                // Draw current hand position
+                if (handX !== undefined) {
+                    const handPosX = handX * indicatorCanvas.width;
+                    indicatorCtx.fillStyle = '#FF0000';
+                    indicatorCtx.beginPath();
+                    indicatorCtx.arc(handPosX, indicatorCanvas.height/2, 5, 0, Math.PI * 2);
+                    indicatorCtx.fill();
+                }
+                
+                requestAnimationFrame(drawTrackingIndicator);
+            }
+            drawTrackingIndicator();
         }
 
         window.addEventListener('resize', () => {
