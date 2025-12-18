@@ -70,6 +70,13 @@
         let bgMusic = new Audio(MUSIC_URL);
         bgMusic.loop = true; bgMusic.volume = 1.0;
 
+        const HAND_CONFIG = {
+            activeWidth: 0.5,
+            minX: 0.25,
+            maxX: 0.75,
+            smoothing: 0.3
+        };
+
         const loader = new THREE.TextureLoader();
         const photoFiles = ['./image1.jpeg', './image2.jpeg', './image3.jpeg', './image4.jpeg', './image5.jpeg'];
         const photoTextures = [];
@@ -128,6 +135,7 @@
         let state = 'TREE'; 
         let selectedIndex = 0;
         let handX = 0.5;
+        let smoothedHandX = 0.5;
 
         function init3D() {
             const container = document.getElementById('canvas-container');
@@ -355,7 +363,9 @@
             requestAnimationFrame(animate);
             const time = Date.now() * 0.001;
             const speed = 0.08;
-            const handRotY = (handX - 0.5) * 4.0;
+            
+            smoothedHandX += (handX - smoothedHandX) * HAND_CONFIG.smoothing;
+            const handRotY = (smoothedHandX - 0.5) * 4.0;
 
             updateParticleGroup(groupGold, 'gold', state, speed, handRotY, time);
             updateParticleGroup(groupRed, 'red', state, speed, handRotY, time);
@@ -443,10 +453,11 @@
                 if(results.multiHandLandmarks.length > 0) {
                     const lm = results.multiHandLandmarks[0];
                     
-                    // Map hand position from center half of camera (0.25 to 0.75) to full range (0 to 1)
-                    const rawX = lm[9].x;
-                    const mappedX = (rawX - 0.25) / 0.5;
-                    handX = Math.max(0, Math.min(1, mappedX));
+                    // Apply hand tracking configuration
+                    let rawX = lm[9].x;
+                    if (rawX < HAND_CONFIG.minX) rawX = HAND_CONFIG.minX;
+                    if (rawX > HAND_CONFIG.maxX) rawX = HAND_CONFIG.maxX;
+                    handX = (rawX - HAND_CONFIG.minX) / HAND_CONFIG.activeWidth;
                     
                     const tips = [8,12,16,20]; const wrist = lm[0];
                     let openDist = 0; tips.forEach(i => openDist += Math.hypot(lm[i].x-wrist.x, lm[i].y-wrist.y));
